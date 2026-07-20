@@ -29,7 +29,7 @@ Copia `.env.example` a `.env` y completa las variables:
 ```dotenv
 SPOTIFY_CLIENT_ID=your_client_id
 SPOTIFY_CLIENT_SECRET=your_client_secret
-SPOTIFY_REDIRECT_URI=http://localhost:8888/callback
+SPOTIFY_REDIRECT_URI=http://127.0.0.1:8888/callback
 SPOTIFY_PLAYLIST_ID=your_playlist_id
 SETLISTFM_API_KEY=your_setlistfm_key
 LOG_LEVEL=INFO
@@ -92,6 +92,9 @@ python -m src.setlistify.cli stats
 - Las pistas ya presentes no se vuelven a añadir.
 - Los elementos eliminados o no disponibles de la playlist se ignoran al
   comprobar duplicados.
+- La playlist se descarga una sola vez por sincronización para comprobar
+  duplicados. Si Spotify responde `429`, el comando muestra el tiempo de
+  reintento indicado por Spotify y se detiene.
 
 ## Desarrollo
 

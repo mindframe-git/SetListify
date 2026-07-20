@@ -44,6 +44,22 @@ def test_setlist_song_count_counts_songs_from_all_sets():
     assert cli.setlist_song_count(setlist) == "3"
 
 
+def test_playlist_artist_names_ignores_unavailable_items():
+    items = [
+        {"track": None},
+        {},
+        {"track": {"artists": [{"name": "Artist A"}, {"name": "Artist B"}]}},
+        {"track": {"artists": [{"name": "Artist A"}]}},
+    ]
+
+    assert cli.playlist_artist_names(items) == {"Artist A", "Artist B"}
+
+
+def test_playlist_track_count_falls_back_to_loaded_items():
+    assert cli.playlist_track_count({"name": "Playlist"}, [{}, {}, {}]) == 3
+    assert cli.playlist_track_count({"tracks": {"total": 12}}, [{}]) == 12
+
+
 def test_choose_artist_can_move_to_next_page(monkeypatch):
     class FakeSetlistClient:
         def search_artists_page(self, _, page):
@@ -56,6 +72,21 @@ def test_choose_artist_can_move_to_next_page(monkeypatch):
         "name": "Artist 2",
         "mbid": "artist-2",
     }
+
+
+def test_choose_artist_raises_cancellation_exception(monkeypatch):
+    class FakeSetlistClient:
+        def search_artists_page(self, _, page):
+            return ([{"name": "Artist", "mbid": "artist-id"}], 2)
+
+    monkeypatch.setattr(cli.typer, "prompt", lambda _: "q")
+
+    try:
+        cli.choose_artist(FakeSetlistClient(), "Artist")
+    except cli.SelectionCancelled:
+        pass
+    else:
+        assert False, "Expected SelectionCancelled"
 
 
 def test_choose_setlist_uses_the_selected_artist(monkeypatch):

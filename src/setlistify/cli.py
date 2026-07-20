@@ -26,6 +26,43 @@ console = Console()
 logger = get_logger(__name__)
 
 
+class SelectionCancelled(Exception):
+    """Raised when the user cancels an interactive selection."""
+
+
+def display_goodbye() -> None:
+    """Display a friendly message after a user-initiated cancellation."""
+    console.print(
+        "[cyan]\n"
+        "  +------------+\n"
+        "  | SetListify |\n"
+        "  +------------+\n"
+        "\nHasta pronto. Tu playlist no se ha modificado.[/cyan]"
+    )
+
+
+def playlist_artist_names(items: list[dict]) -> set[str]:
+    """Return artist names from available playlist items only."""
+    artists = set()
+    for item in items:
+        track = item.get("track")
+        if not track:
+            continue
+        for artist in track.get("artists", []):
+            name = artist.get("name")
+            if name:
+                artists.add(name)
+    return artists
+
+
+def playlist_track_count(playlist: dict, items: list[dict]) -> int:
+    """Return Spotify's total when available, otherwise count loaded items."""
+    tracks = playlist.get("tracks")
+    if isinstance(tracks, dict) and isinstance(tracks.get("total"), int):
+        return tracks["total"]
+    return len(items)
+
+
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
@@ -97,7 +134,7 @@ def choose_artist(setlist_client: SetlistFmClient, artist_name: str) -> Optional
             "Choose an artist number, [n]ext, [p]revious, or [q]uit"
         ).strip().lower()
         if selection == "q":
-            return None
+            raise SelectionCancelled
         if selection == "n":
             if page < total_pages:
                 page += 1
@@ -184,7 +221,7 @@ def choose_setlist(setlist_client: SetlistFmClient, artist: dict) -> Optional[Se
         ).strip().lower()
 
         if selection == "q":
-            return None
+            raise SelectionCancelled
         if selection == "n":
             if page < total_pages:
                 page += 1
@@ -378,6 +415,11 @@ def add(artist: str) -> None:
         )
         display_sync_summary(result)
 
+    except SelectionCancelled:
+        display_goodbye()
+        return
+    except typer.Exit:
+        raise
     except Exception as e:
         logger.exception("Error adding artist")
         console.print(f"[red]✗ Error: {e}[/red]")
@@ -405,15 +447,12 @@ def stats() -> None:
         artists = cache.get_all_artists()
 
         # Count unique artists in playlist
-        unique_artists_set = set()
-        for track in tracks:
-            for artist in track["track"]["artists"]:
-                unique_artists_set.add(artist["name"])
+        unique_artists_set = playlist_artist_names(tracks)
 
         console.print()
         console.print("[bold cyan]Playlist Statistics[/bold cyan]")
         console.print(f"Playlist: [bold]{playlist['name']}[/bold]")
-        console.print(f"Total tracks: {playlist['tracks']['total']}")
+        console.print(f"Total tracks: {playlist_track_count(playlist, tracks)}")
         console.print(f"Unique artists: {len(unique_artists_set)}")
         console.print()
 

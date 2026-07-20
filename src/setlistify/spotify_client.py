@@ -10,6 +10,7 @@ from typing import Optional, Any
 import logging
 
 import spotipy
+from spotipy.exceptions import SpotifyException
 from spotipy.oauth2 import SpotifyOAuth
 
 from .config import Config
@@ -18,6 +19,17 @@ from .utils import parse_uri_id, is_live_album, is_tribute_or_cover
 
 
 logger = logging.getLogger(__name__)
+
+
+class SpotifyRateLimitError(RuntimeError):
+    """Raised when Spotify rejects a request with a retry delay."""
+
+    def __init__(self, retry_after: Optional[str] = None):
+        self.retry_after = retry_after
+        message = "Spotify rate limit reached."
+        if retry_after:
+            message += f" Retry after {retry_after} seconds."
+        super().__init__(message)
 
 
 class SpotifyClient:
@@ -56,6 +68,16 @@ class SpotifyClient:
 
         self.sp = spotipy.Spotify(auth_manager=auth_manager)
         logger.info("✓ Spotify authentication successful")
+
+    @staticmethod
+    def _raise_if_rate_limited(error: SpotifyException) -> None:
+        """Translate a Spotify 429 response into an actionable error."""
+        if error.http_status != 429:
+            return
+
+        headers = getattr(error, "headers", None) or {}
+        retry_after = headers.get("Retry-After") or headers.get("retry-after")
+        raise SpotifyRateLimitError(retry_after) from error
 
     def get_current_user(self) -> dict[str, Any]:
         """Get current user information.
@@ -96,6 +118,10 @@ class SpotifyClient:
 
         try:
             results = self.sp.search(q=query, type="track", limit=9)
+        except SpotifyException as e:
+            self._raise_if_rate_limited(e)
+            logger.error(f"Spotify search error for '{track_name}' by '{artist_name}': {e}")
+            return None
         except Exception as e:
             logger.error(f"Spotify search error for '{track_name}' by '{artist_name}': {e}")
             return None
@@ -260,16 +286,30 @@ class SpotifyClient:
             raise RuntimeError("Not authenticated with Spotify")
 
         tracks = []
-        results = self.sp.playlist_tracks(playlist_id)
+        try:
+            results = self.sp.playlist_tracks(playlist_id)
 
-        while results:
-            tracks.extend(results["items"])
-            if results["next"]:
-                results = self.sp.next(results)
-            else:
-                break
+            while results:
+                tracks.extend(results["items"])
+                if results["next"]:
+                    results = self.sp.next(results)
+                else:
+                    break
+        except SpotifyException as e:
+            self._raise_if_rate_limited(e)
+            raise
 
         return tracks
+
+    def get_playlist_track_ids(self, playlist_id: str) -> set[str]:
+        """Return all available track IDs in a playlist with one fetch."""
+        track_ids = set()
+        for item in self.get_playlist_tracks(playlist_id):
+            track = item.get("track")
+            if not track or not track.get("uri"):
+                continue
+            track_ids.add(parse_uri_id(track["uri"]))
+        return track_ids
 
     def track_exists_in_playlist(
         self,
@@ -327,18 +367,23 @@ class SpotifyClient:
         track_uris = []
         not_found = []
         skipped_count = 0
+        existing_track_ids = (
+            self.get_playlist_track_ids(playlist_id) if skip_duplicates else set()
+        )
 
         for song in songs:
             if not song.spotify_uri:
                 not_found.append(song)
                 continue
 
-            if skip_duplicates and self.track_exists_in_playlist(playlist_id, song):
+            song_id = parse_uri_id(song.spotify_uri)
+            if skip_duplicates and song_id in existing_track_ids:
                 logger.debug(f"Track already in playlist: {song.name}")
                 skipped_count += 1
                 continue
 
             track_uris.append(song.spotify_uri)
+            existing_track_ids.add(song_id)
 
         if not track_uris:
             logger.info("No new tracks to add")
@@ -352,6 +397,10 @@ class SpotifyClient:
                 self.sp.playlist_add_items(playlist_id, batch)
                 added += len(batch)
                 logger.info(f"Added {len(batch)} tracks to playlist")
+            except SpotifyException as e:
+                self._raise_if_rate_limited(e)
+                logger.error(f"Error adding tracks to playlist: {e}")
+                raise
             except Exception as e:
                 logger.error(f"Error adding tracks to playlist: {e}")
                 raise

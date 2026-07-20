@@ -47,8 +47,10 @@ de la API; la descarga completa se retrasa hasta que el usuario elige uno.
 - La caché se usa antes de llamar al endpoint Search de Spotify.
 - Las pistas sin URI se contabilizan como no encontradas y no se envían a
   Spotify.
-- Para evitar duplicados se consulta la playlist. Los elementos sin `track` o
-  sin URI —por ejemplo, pistas eliminadas— se ignoran con seguridad.
+- Para evitar duplicados se consulta la playlist una sola vez por
+  sincronización y se compara contra un conjunto de URIs en memoria. Los
+  elementos sin `track` o sin URI —por ejemplo, pistas eliminadas— se ignoran
+  con seguridad.
 - Las altas se envían en lotes de hasta 100 URIs.
 
 ## Límites externos
